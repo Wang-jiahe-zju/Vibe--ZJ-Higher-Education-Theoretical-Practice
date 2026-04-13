@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>题库刷题</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <h1>题库刷题</h1>
+        <p class="sub">本地 xlsx · 错题统计 · DeepSeek 解析</p>
+      </header>
+
+      <nav class="nav" id="mainNav">
+        <button type="button" class="nav-btn active" data-nav="home">刷题</button>
+        <button type="button" class="nav-btn" data-nav="wrongbook">错题本</button>
+        <button type="button" class="nav-btn" data-nav="settings">API 设置</button>
+      </nav>
+
+      <div id="page-home" class="page">
+        <section class="panel" id="setup">
+          <h2>开始</h2>
+          <label class="field">
+            <span>选择题库</span>
+            <select id="bankSelect"></select>
+          </label>
+          <label class="field">
+            <span>本轮最多几题（可选）</span>
+            <input
+              type="number"
+              id="sessionLimit"
+              min="1"
+              step="1"
+              placeholder="不填则本模式下列出的题全部做完"
+            />
+          </label>
+          <p class="hint hint-tight">
+            「全部」模式题目顺序为随机；「错题」模式也会随机打乱。随时点右上角「结束」可中途退出，已做题与错题仍会保留。
+          </p>
+          <div class="row">
+            <button type="button" id="btnStart" class="primary">开始刷题</button>
+            <button type="button" id="btnWrong" class="ghost">只练错题</button>
+          </div>
+        </section>
+
+        <section class="panel" id="bankOverview">
+          <h2>题库熟悉度</h2>
+          <p class="hint">
+            灰色表示尚未在本应用里提交过该题答案；提交后即按错题次数用蓝→红显示（蓝为 0 次错题，红为相对最多）。同一题库内红端按该库最大错题次数归一化。
+          </p>
+          <label class="field">
+            <span>选择题库</span>
+            <select id="overviewBankSelect"></select>
+          </label>
+          <div class="heat-legend heat-legend-row" id="heatLegend" aria-hidden="true">
+            <span class="heat-legend-swatch heat-legend-swatch-unseen" title="未做过"></span>
+            <span class="heat-legend-label">未做</span>
+            <span class="heat-legend-gap"></span>
+            <span class="heat-legend-label">已做</span>
+            <div class="heat-legend-bar"></div>
+            <span class="heat-legend-label">需加强</span>
+          </div>
+          <div id="heatMatrix" class="heat-matrix" role="img" aria-label="题目熟悉度热图"></div>
+        </section>
+      </div>
+
+      <div id="page-wrongbook" class="page hidden">
+        <section class="panel">
+          <h2>错题本</h2>
+          <p class="hint">
+            按题库分别记录错题次数（含单选、多选、判断）；数据保存在本机浏览器。每题下方的「AI 解析」默认折叠；生成后保存在本机，可「编辑」修改并「保存」，再次打开不会重复请求 API（保存为空则清除该条解析）。左侧色条与热格规则同「题库熟悉度」。
+          </p>
+          <label class="field">
+            <span>查看题库</span>
+            <select id="wrongBankSelect"></select>
+          </label>
+          <div class="heat-legend heat-legend-compact" id="wrongHeatLegend" aria-hidden="true">
+            <span class="heat-legend-label">更熟</span>
+            <div class="heat-legend-bar"></div>
+            <span class="heat-legend-label">需加强</span>
+          </div>
+          <div id="wrongHeatStrip" class="wrong-heat-strip" role="img" aria-label="错题熟悉度条"></div>
+          <div id="wrongList" class="wrong-list"></div>
+        </section>
+      </div>
+
+      <div id="page-settings" class="page hidden">
+        <section class="panel" id="ai">
+          <h2>DeepSeek API</h2>
+          <p class="hint">密钥仅保存在浏览器 localStorage，不会上传到本服务器。</p>
+          <label class="field">
+            <span>API Key</span>
+            <input
+              type="password"
+              id="apiKey"
+              autocomplete="off"
+              placeholder="sk-..."
+            />
+          </label>
+          <label class="field">
+            <span>Base URL（默认 DeepSeek）</span>
+            <input type="text" id="apiBase" value="https://api.deepseek.com" />
+          </label>
+          <label class="field">
+            <span>模型</span>
+            <input type="text" id="apiModel" value="deepseek-chat" />
+          </label>
+          <div class="row">
+            <button type="button" id="btnSaveKey" class="primary sm">保存设置</button>
+            <span id="keyStatus" class="status"></span>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel hidden" id="quiz">
+        <div class="quiz-head">
+          <span id="quizMeta"></span>
+          <button type="button" id="btnExit" class="ghost sm">结束</button>
+        </div>
+        <div class="progress"><div class="bar" id="progressBar"></div></div>
+        <article class="card">
+          <div class="qtype" id="qType"></div>
+          <div class="stem" id="qStem"></div>
+          <div class="opts" id="qOpts"></div>
+        </article>
+        <div class="row">
+          <button type="button" id="btnSubmit" class="primary" disabled>提交答案</button>
+          <button type="button" id="btnNext" class="ghost hidden">下一题</button>
+        </div>
+        <div class="feedback hidden" id="feedback"></div>
+      </section>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js" crossorigin="anonymous"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
