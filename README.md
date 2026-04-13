@@ -58,10 +58,10 @@ python3 -m venv .venv
 
 ## DeepSeek 说明
 
-- 在「API 设置」中填写 Key 等并保存后，请求从**浏览器直连** `https://api.deepseek.com`（或你填写的 Base URL），**不会经过本仓库的 Python 服务**。
+- 在「API 设置」中填写 Key 等并保存后，请求从**浏览器直连** `https://api.deepseek.com`（或你填写的 Base URL）。
 - 已生成并保存的解析默认不再请求接口，可节省调用次数。
 
-## 项目结构（简要）
+## 项目结构
 
 ```
 题库/
@@ -75,6 +75,3 @@ python3 -m venv .venv
 └── *.xlsx             # 题库文件（按需自行放置）
 ```
 
-## 许可证与题库版权
-
-代码以你仓库中的约定为准。题库 Excel 的版权与是否适合公开传播请自行确认。
