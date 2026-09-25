@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>题库刷题</title>
+    <title>浙江省高等学校教师教育理论刷题APP</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <div class="app">
       <header class="top">
-        <h1>题库刷题</h1>
-        <p class="sub">本地 xlsx · 错题统计 · DeepSeek 解析</p>
+        <h1>浙江省高等学校教师教育理论刷题APP</h1>
+        <p class="sub">本地 xlsx · 知识分类 · 错题统计 · DeepSeek 解析</p>
       </header>
 
       <nav class="nav" id="mainNav">
@@ -27,6 +27,10 @@
             <select id="bankSelect"></select>
           </label>
           <label class="field">
+            <span>按知识分类练习</span>
+            <select id="categorySelect"></select>
+          </label>
+          <label class="field">
             <span>本轮最多几题（可选）</span>
             <input
               type="number"
@@ -41,8 +45,10 @@
           </p>
           <div class="row">
             <button type="button" id="btnStart" class="primary">开始刷题</button>
+            <button type="button" id="btnCategory" class="ghost">练当前分类</button>
             <button type="button" id="btnWrong" class="ghost">只练错题</button>
           </div>
+          <div id="categorySummary" class="category-summary" aria-live="polite"></div>
         </section>
 
         <section class="panel" id="bankOverview">
@@ -130,6 +136,7 @@
           <button type="button" id="btnNext" class="ghost hidden">下一题</button>
         </div>
         <div class="feedback hidden" id="feedback"></div>
+        <div id="quizAiShell" class="quiz-ai-shell hidden" aria-live="polite"></div>
       </section>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js" crossorigin="anonymous"></script>

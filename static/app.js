@@ -119,6 +119,7 @@ let pickOne = null;
 let pickMulti = new Set();
 let mode = "all";
 let currentNavPage = "home";
+let activeCategory = "";
 
 function bumpWrong(bankId, qid) {
   const s = loadStats();
@@ -164,6 +165,65 @@ function formatAnswerForUi(q) {
   return q.answer;
 }
 
+function buildMemoryTip(q) {
+  const stem = q.stem || "";
+  const optionCount = Object.keys(q.options || {}).length;
+  const answerCount = (q.answer || "").length;
+  const inclusiveWords = [
+    "包括",
+    "包含",
+    "属于",
+    "体现",
+    "表现",
+    "内容",
+    "特征",
+    "原则",
+    "要求",
+    "途径",
+    "措施",
+    "任务",
+    "职责",
+    "权利",
+    "义务",
+    "条件",
+    "因素",
+    "作用",
+  ];
+  const negativeWords = ["不包括", "不属于", "不是", "不正确", "错误", "无关", "除外"];
+  const hasInclusive = inclusiveWords.some((w) => stem.includes(w));
+  const hasNegative = negativeWords.some((w) => stem.includes(w));
+
+  if (q.kind === "multi") {
+    if (optionCount > 0 && answerCount === optionCount) {
+      const lead = hasInclusive
+        ? "这题是“包容型问法”：看到“包括/属于/体现/内容/原则/措施/职责/权利义务”等词，且选项都在同一正向范畴里，本题可按全选记。"
+        : "这题正确答案是全选，可以把四个选项合成一组概念背，不要拆成孤立答案。";
+      return `${lead} 做同类多选时先找“明显异类、绝对化、否定项”，找不到再大胆考虑全选。`;
+    }
+    if (hasNegative) {
+      return "这题干带否定词，先圈出“不/错误/除外”等关键词，再反向排除；这类题最容易把正向知识当成答案。";
+    }
+    if (answerCount === optionCount - 1) {
+      return "这题属于“排除一项”型多选：多数选项同属一个知识簇，重点记那个不入群的干扰项。";
+    }
+    if (hasInclusive) {
+      return "这题是开放列举式问法，先按分类回忆一整组，再用选项查漏；不要只凭最熟的一个词就停手。";
+    }
+    return "多选题先判断题干是“列举同类”还是“辨析差异”：同类题防漏选，辨析题防把相近概念混进来。";
+  }
+  if (q.kind === "judge") {
+    return hasNegative
+      ? "判断题遇到否定表达要慢半拍：先把句子改写成正向命题，再判断它是否成立。"
+      : "判断题重点抓绝对化词和因果关系；理论题里“都、必然、完全、只要”通常要格外谨慎。";
+  }
+  if (hasNegative) {
+    return "单选否定题先找题干里的“不/错误/除外”，再从三个正确表述里反衬出那个异类项。";
+  }
+  return q.category
+    ? `这题归在「${q.category}」，复习时建议和同分类题连做，优先记概念边界和常见关键词。`
+    : "";
+}
+
 async function fetchBanks() {
   const r = await fetch("/api/banks");
   if (!r.ok) throw new Error("无法加载题库列表");
@@ -186,6 +246,9 @@ async function loadQuestions(bankId) {
   const r = await fetch(`/api/banks/${encodeURIComponent(bankId)}/questions`);
   if (!r.ok) throw new Error("无法加载题目");
   questions = await r.json();
+  if ($("bankSelect") && bankId === $("bankSelect").value) {
+    renderCategoryControls();
+  }
 }
 
 function qById(id) {
@@ -206,6 +269,44 @@ function readSessionLimit() {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function categoryCounts() {
+  const counts = new Map();
+  for (const q of questions) {
+    const c = q.category || "其他综合题";
+    counts.set(c, (counts.get(c) || 0) + 1);
+  }
+  return counts;
+}
+
+function renderCategoryControls() {
+  const sel = $("categorySelect");
+  const summary = $("categorySummary");
+  if (!sel || !summary) return;
+  const previous = sel.value;
+  const counts = [...categoryCounts().entries()].sort((a, b) => b[1] - a[1]);
+  sel.innerHTML = "";
+  for (const [name, count] of counts) {
+    const o = document.createElement("option");
+    o.value = name;
+    o.textContent = `${name}（${count} 题）`;
+    sel.appendChild(o);
+  }
+  if (previous && counts.some(([name]) => name === previous)) {
+    sel.value = previous;
+  }
+  summary.innerHTML = "";
+  for (const [name, count] of counts) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "category-chip";
+    chip.textContent = `${name} ${count}`;
+    chip.addEventListener("click", () => {
+      sel.value = name;
+    });
+    summary.appendChild(chip);
+  }
+}
+
 function buildQueue(bankId) {
   const s = loadStats();
   const wrongIds = new Set(Object.keys(s[bankId] || {}));
@@ -213,6 +314,13 @@ function buildQueue(bankId) {
     queue = questions.filter((q) => wrongIds.has(String(q.id)));
     if (queue.length === 0) {
       alert("该题库暂无错题记录。");
+      return false;
+    }
+  } else if (mode === "category") {
+    activeCategory = $("categorySelect").value;
+    queue = questions.filter((q) => (q.category || "其他综合题") === activeCategory);
+    if (queue.length === 0) {
+      alert("该分类下暂无题目。");
       return false;
     }
   } else {
@@ -346,6 +454,11 @@ function renderQuestion() {
   $("feedback").classList.add("hidden");
   $("feedback").textContent = "";
   $("feedback").classList.remove("ok", "bad");
+  const quizAi = $("quizAiShell");
+  if (quizAi) {
+    quizAi.classList.add("hidden");
+    quizAi.innerHTML = "";
+  }
 
   const pct = total ? Math.round((idx / total) * 100) : 0;
   $("progressBar").style.width = `${pct}%`;
@@ -353,7 +466,8 @@ function renderQuestion() {
     idx + 1
   } / ${total}`;
 
-  $("qType").textContent = q.type || "题目";
+  const category = q.category ? ` · ${q.category}` : "";
+  $("qType").textContent = `${q.type || "题目"}${category}`;
   $("qStem").textContent = q.stem;
   const opts = $("qOpts");
   opts.innerHTML = "";
@@ -445,7 +559,8 @@ function renderWrongList() {
   });
 }
 
-function mountAnalysisDetails(item, bankId, qid) {
+/** 与错题本共用 `quiz_ai_analysis_v1`（同一题库 + 题号） */
+function createAnalysisDetails(bankId, qid) {
   const details = document.createElement("details");
   details.className = "ai-details";
   const summary = document.createElement("summary");
@@ -455,7 +570,24 @@ function mountAnalysisDetails(item, bankId, qid) {
   details.appendChild(summary);
   details.appendChild(panel);
   fillAnalysisPanel(bankId, qid, panel, summary, details);
-  item.appendChild(details);
+  return details;
+}
+
+function mountAnalysisDetails(item, bankId, qid) {
+  item.appendChild(createAnalysisDetails(bankId, qid));
+}
+
+function mountQuizAnalysisShell(bankId, qid) {
+  const shell = $("quizAiShell");
+  if (!shell) return;
+  shell.innerHTML = "";
+  const hint = document.createElement("p");
+  hint.className = "hint sm quiz-ai-sync-hint";
+  hint.textContent =
+    "与「错题本」中该题为同一份解析（同一题库 + 题号），任一处生成、编辑、保存后另一处一致。";
+  shell.appendChild(hint);
+  shell.appendChild(createAnalysisDetails(bankId, String(qid)));
+  shell.classList.remove("hidden");
 }
 
 function fillAnalysisPanel(bankId, qid, panel, summary, detailsEl) {
@@ -635,13 +767,14 @@ function buildAiPrompt(q) {
   const letters = Object.keys(q.options).sort();
   const optsText = letters.map((L) => `${L}. ${q.options[L]}`).join("\n");
   const correctText = formatAnswerForUi(q);
+  const categoryText = q.category ? `\n知识分类：${q.category}` : "";
   const hint =
     q.kind === "judge"
-      ? "说明判断依据与常见误区。"
+      ? "说明判断依据、绝对化/否定词等常见陷阱。"
       : q.kind === "multi"
-        ? "逐项说明应选或不选的理由，并解释组合思路。"
-        : "说明正确选项为什么对，以及其它选项错在哪里。";
-  return `请用中文简要分析下面这道${q.type || "题目"}：${hint}控制在 450 字以内。\n\n题干：\n${q.stem}\n\n选项：\n${optsText}\n\n正确答案：${correctText}`;
+        ? "逐项说明应选或不选的理由，并重点总结多选题套路：是否属于全选、排除一项、同类列举、否定反选；如果能从题干关键词判断，例如“包括、体现、原则、措施、职责、权利义务”等，请明确写出。"
+        : "说明正确选项为什么对、其它选项错在哪里，并总结题干关键词与干扰项套路。";
+  return `请用中文简要分析下面这道${q.type || "题目"}：${hint}控制在 450 字以内，最后给出1-2条tricky记忆/速判方法，但不要编造不可靠规律。${categoryText}\n\n题干：\n${q.stem}\n\n选项：\n${optsText}\n\n正确答案：${correctText}`;
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -650,8 +783,11 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 
 $("bankSelect").addEventListener("change", () => {
   $("overviewBankSelect").value = $("bankSelect").value;
-  loadQuestions($("overviewBankSelect").value)
-    .then(() => renderHeatMatrix())
+  loadQuestions($("bankSelect").value)
+    .then(() => {
+      $("overviewBankSelect").value = $("bankSelect").value;
+      renderHeatMatrix();
+    })
     .catch(console.error);
 });
 
@@ -664,6 +800,15 @@ $("overviewBankSelect").addEventListener("change", async () => {
 $("btnStart").addEventListener("click", async () => {
   const bankId = $("bankSelect").value;
   mode = "all";
+  await loadQuestions(bankId);
+  if (!buildQueue(bankId)) return;
+  showQuiz();
+  renderQuestion();
+});
+
+$("btnCategory").addEventListener("click", async () => {
+  const bankId = $("bankSelect").value;
+  mode = "category";
   await loadQuestions(bankId);
   if (!buildQueue(bankId)) return;
   showQuiz();
@@ -690,7 +835,14 @@ $("btnSubmit").addEventListener("click", () => {
   const fb = $("feedback");
   fb.classList.remove("hidden", "ok", "bad");
   fb.classList.add(ok ? "ok" : "bad");
+  const tip = buildMemoryTip(q);
   fb.textContent = ok ? "回答正确。" : `回答错误。正确答案是：${formatAnswerForUi(q)}。`;
+  if (tip) {
+    const tipEl = document.createElement("div");
+    tipEl.className = "memory-tip";
+    tipEl.textContent = `记忆提示：${tip}`;
+    fb.appendChild(tipEl);
+  }
   markQuestionSeen(bankId, String(q.id));
   if (!ok) bumpWrong(bankId, String(q.id));
 
@@ -714,6 +866,9 @@ $("btnSubmit").addEventListener("click", () => {
     }
   });
   afterSubmit();
+  if (!ok) {
+    mountQuizAnalysisShell(bankId, String(q.id));
+  }
 });
 
 $("btnNext").addEventListener("click", () => {
