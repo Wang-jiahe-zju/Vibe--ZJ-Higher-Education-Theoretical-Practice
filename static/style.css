@@ -41,6 +41,10 @@ body[data-theme="day"] .feedback {
   background: #f1f4f7;
 }
 
+body[data-theme="day"] .heat-legend-swatch-history {
+  background: #788493;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -370,6 +374,10 @@ button:disabled {
 
 .heat-legend-swatch-unseen {
   background: rgb(74, 84, 96);
+}
+
+.heat-legend-swatch-history {
+  background: #788493;
 }
 
 .heat-legend-gap {

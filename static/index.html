@@ -65,19 +65,31 @@
         <section class="panel" id="bankOverview">
           <h2>题库熟悉度</h2>
           <p class="hint">
-            灰色表示尚未在本应用里提交过该题答案；提交后即按错题次数用蓝→红显示（蓝为 0 次错题，红为相对最多）。同一题库内红端按该库最大错题次数归一化。
+            可按题型筛选。热图按逐题正确率着色（蓝色较高、红色较低）；尚未做过和历史记录缺少逐次作答数据的题目会单独标出。
           </p>
           <label class="field">
             <span>选择题库</span>
             <select id="overviewBankSelect"></select>
           </label>
+          <label class="field">
+            <span>题型筛选</span>
+            <select id="heatFilter">
+              <option value="all">全部题型</option>
+              <option value="single">单选题</option>
+              <option value="multi">多选题</option>
+              <option value="judge">判断题</option>
+            </select>
+          </label>
+          <p id="heatAccuracy" class="status" role="status"></p>
           <div class="heat-legend heat-legend-row" id="heatLegend" aria-hidden="true">
             <span class="heat-legend-swatch heat-legend-swatch-unseen" title="未做过"></span>
             <span class="heat-legend-label">未做</span>
+            <span class="heat-legend-swatch heat-legend-swatch-history" title="无逐次正确率记录"></span>
+            <span class="heat-legend-label">暂无正确率</span>
             <span class="heat-legend-gap"></span>
-            <span class="heat-legend-label">已做</span>
+            <span class="heat-legend-label">正确率</span>
             <div class="heat-legend-bar"></div>
-            <span class="heat-legend-label">需加强</span>
+            <span class="heat-legend-label">低</span>
           </div>
           <div id="heatMatrix" class="heat-matrix" role="img" aria-label="题目熟悉度热图"></div>
         </section>

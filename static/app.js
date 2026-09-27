@@ -2,6 +2,7 @@ const LS_KEY = "quiz_bank_stats_v1";
 const LS_API = "quiz_deepseek_cfg_v1";
 const LS_ANALYSIS = "quiz_ai_analysis_text_v2";
 const LS_SEEN = "quiz_question_seen_v1";
+const LS_ANSWER_STATS = "quiz_answer_stats_v1";
 const LS_SESSION = "quiz_sessions_v1";
 const LS_EXAMS = "quiz_exam_results_v1";
 const LS_THEME = "quiz_theme_v1";
@@ -154,6 +155,19 @@ function loadSeenStore() {
   } catch {
     return {};
   }
+}
+
+function loadAnswerStats() {
+  try { return JSON.parse(localStorage.getItem(LS_ANSWER_STATS) || "{}"); }
+  catch { return {}; }
+}
+
+function recordAnswer(bankId, qid, correct) {
+  const all = loadAnswerStats();
+  const bank = all[bankId] ||= {};
+  const stats = bank[String(qid)] ||= {correct:0,wrong:0};
+  stats[correct ? "correct" : "wrong"] += 1;
+  localStorage.setItem(LS_ANSWER_STATS, JSON.stringify(all));
 }
 
 function isQuestionSeen(bankId, qid) {
@@ -507,16 +521,32 @@ function renderHeatMatrix() {
     return;
   }
   const map = loadStats()[bankId] || {};
-  const maxW = maxWrongForBank(bankId);
+  const accuracyStats = loadAnswerStats()[bankId] || {};
+  const labels = {single:"单选",multi:"多选",judge:"判断"};
+  const accuracyFor = kind => {
+    let correct=0, wrong=0;
+    for (const q of questions) if (q.kind===kind) {
+      const item=accuracyStats[String(q.id)];
+      correct += item?.correct || 0; wrong += item?.wrong || 0;
+    }
+    const total=correct+wrong;
+    return total ? `${Math.round(correct/total*100)}% (${correct}/${total})` : "暂无作答";
+  };
+  $("heatAccuracy").textContent = ["single","multi","judge"].map(kind=>`${labels[kind]}正确率 ${accuracyFor(kind)}`).join("　·　");
+  const filter=$("heatFilter").value;
   host.innerHTML = "";
-  for (const q of questions) {
+  const visibleQuestions=filter==="all"?questions:questions.filter(q=>q.kind===filter);
+  for (const q of visibleQuestions) {
     const w = map[String(q.id)]?.wrong || 0;
     const seen = isQuestionSeen(bankId, q.id);
+    const answers=accuracyStats[String(q.id)];
+    const attempts=(answers?.correct||0)+(answers?.wrong||0);
+    const accuracy=attempts?(answers.correct||0)/attempts:null;
     const cell = document.createElement("div");
-    cell.className = "heat-cell" + (seen ? "" : " heat-cell-unseen");
-    cell.style.backgroundColor = seen ? heatColor(w, maxW) : HEAT_UNSEEN;
-    const status = seen ? `已做过 · 错题 ${w} 次` : "尚未在本应用提交过答案";
-    cell.title = `题号 ${q.id} · ${status} · ${q.type || ""}`;
+    cell.className = "heat-cell" + (!seen ? " heat-cell-unseen" : accuracy===null ? " heat-cell-history" : "");
+    cell.style.backgroundColor = !seen ? HEAT_UNSEEN : accuracy===null ? "#788493" : heatColor(1-accuracy,1);
+    const status = !seen ? "尚未作答" : accuracy===null ? `已做过 · 暂无逐次正确率 · 历史错题 ${w} 次` : `正确率 ${Math.round(accuracy*100)}% · ${answers.correct} 对 / ${attempts} 次`;
+    cell.title = `${q.kind==="single"?"单选":q.kind==="multi"?"多选":"判断"} · 题号 ${q.id} · ${status}`;
     host.appendChild(cell);
   }
 }
@@ -873,6 +903,8 @@ $("overviewBankSelect").addEventListener("change", async () => {
   renderHeatMatrix();
 });
 
+$("heatFilter").addEventListener("change", renderHeatMatrix);
+
 $("btnStart").addEventListener("click", async () => {
   const bankId = $("bankSelect").value;
   examMode=false; examAllQuestions=[];
@@ -949,6 +981,7 @@ $("btnSubmit").addEventListener("click", () => {
   const bankId = $("bankSelect").value;
   const q = queue[idx];
   const ok = isCorrect(q);
+  recordAnswer(bankId, String(q.id), ok);
   if(examMode){examAnswers.set(String(q.id),userAnswerString(q));saveExamDraft(bankId);}
   const fb = $("feedback");
   fb.classList.remove("hidden", "ok", "bad");
@@ -956,6 +989,7 @@ $("btnSubmit").addEventListener("click", () => {
   fb.textContent = examMode ? (ok ? "本题答对。" : "本题答错，成绩交卷后公布。") : (ok ? "回答正确。" : `回答错误。正确答案是：${formatAnswerForUi(q)}。`);
   markQuestionSeen(bankId, String(q.id));
   if (!ok) bumpWrong(bankId, String(q.id));
+  if (currentNavPage === "home" && $("overviewBankSelect").value === bankId) renderHeatMatrix();
   saveSession(idx + 1);
 
   $("qOpts").querySelectorAll(".opt").forEach((lab) => {

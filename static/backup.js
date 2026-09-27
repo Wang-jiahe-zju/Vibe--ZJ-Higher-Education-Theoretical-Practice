@@ -2,7 +2,7 @@
 const QuizBackup = (() => {
   const keys = ['quiz_bank_stats_v1', 'quiz_question_seen_v1', 'quiz_ai_analysis_v1',
     'quiz_ai_analysis_text_v2', 'quiz_structured_analysis_v2', 'quiz_sessions_v1',
-    'quiz_exam_results_v1', 'quiz_exam_drafts_v1'];
+    'quiz_exam_results_v1', 'quiz_exam_drafts_v1', 'quiz_answer_stats_v1'];
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const safe = key => !['__proto__', 'constructor', 'prototype'].includes(key);
   const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -38,6 +38,13 @@ const QuizBackup = (() => {
               Object.keys(records).some(k => !['answers','ids'].includes(k))) throw new Error('模拟试卷断点格式错误。');
           continue;
         }
+        if (key === keys[8]) {
+          for (const [id,value] of Object.entries(records)) {
+            if (!safe(id) || !object(value) || !integer(value.correct) || !integer(value.wrong) ||
+                Object.keys(value).some(k => !['correct','wrong'].includes(k))) throw new Error(`正确率记录格式错误：${bank} #${id}`);
+          }
+          continue;
+        }
         for (const [id, value] of Object.entries(records)) {
           if (!safe(id)) throw new Error('题号无效。');
           let valid;
@@ -69,6 +76,14 @@ const QuizBackup = (() => {
         if (runs.length) result.data[key][bank] = runs;
         continue;
       }
+      if (key === keys[8]) {
+        const target = result.data[key][bank] ||= {};
+        for (const [id,value] of Object.entries(records)) {
+          const old=target[id] || {correct:0,wrong:0};
+          target[id]={correct:Math.max(old.correct,value.correct),wrong:Math.max(old.wrong,value.wrong)};
+        }
+        continue;
+      }
       const target = result.data[key][bank] ||= {};
       for (const [id, value] of Object.entries(records)) {
         if (!(id in target)) target[id] = value;
@@ -96,7 +111,7 @@ const QuizBackup = (() => {
   }
   function summary(backup) {
     const count = key => Object.values(backup.data[key]).reduce((sum, records) => sum + Object.keys(records).length,0);
-    return `已做 ${count(keys[1])} 题 · 错题 ${count(keys[0])} 题 · 结构化解析 ${count(keys[4])} 条 · 文本解析 ${count(keys[2])+count(keys[3])} 条 · 练习断点 ${Object.keys(backup.data[keys[5]]).length} 个 · 模拟成绩 ${count(keys[6])} 次`;
+    return `已做 ${count(keys[1])} 题 · 错题 ${count(keys[0])} 题 · 结构化解析 ${count(keys[4])} 条 · 文本解析 ${count(keys[2])+count(keys[3])} 条 · 练习断点 ${Object.keys(backup.data[keys[5]]).length} 个 · 模拟成绩 ${count(keys[6])} 次 · 正确率记录 ${count(keys[8])} 题`;
   }
   return {validate,capture,merge,restore,summary};
 })();
