@@ -1,7 +1,75 @@
 const LS_KEY = "quiz_bank_stats_v1";
 const LS_API = "quiz_deepseek_cfg_v1";
-const LS_ANALYSIS = "quiz_ai_analysis_v1";
+const LS_ANALYSIS = "quiz_ai_analysis_text_v2";
 const LS_SEEN = "quiz_question_seen_v1";
+const LS_SESSION = "quiz_sessions_v1";
+const LS_EXAMS = "quiz_exam_results_v1";
+const LS_THEME = "quiz_theme_v1";
+const LS_EXAM_DRAFT = "quiz_exam_drafts_v1";
+let examMode = false;
+let examAnswers = new Map();
+let examAllQuestions = [];
+
+function savedSessions() {
+  try { return JSON.parse(localStorage.getItem(LS_SESSION) || "{}"); }
+  catch { return {}; }
+}
+
+function examResults() { try { return JSON.parse(localStorage.getItem(LS_EXAMS) || "{}"); } catch { return {}; } }
+function examDrafts() { try { return JSON.parse(localStorage.getItem(LS_EXAM_DRAFT) || "{}"); } catch { return {}; } }
+
+function updateExamStats() {
+  const runs = examResults()[$("bankSelect").value] || [];
+  const passed = runs.filter(run => run.passed).length;
+  $("examStats").textContent = runs.length ? `模拟 ${runs.length} 次 · 通过 ${passed} 次 · 通过率 ${Math.round(passed / runs.length * 100)}% · 最近 ${runs[0].score}/100 分` : "尚无模拟成绩";
+}
+
+function applyTheme(theme) {
+  document.body.dataset.theme = theme;
+  const day = theme === "day";
+  $("themeToggle").textContent = day ? "切换夜间模式" : "切换日间模式";
+  $("themeToggle").setAttribute("aria-pressed", String(day));
+}
+
+function finishExam(bank) {
+  let score = 0;
+  for (const q of examAllQuestions) if (examAnswers.get(String(q.id)) === q.answer) score += q.kind === "multi" ? 2 : 1;
+  const results=examResults(); results[bank] ||= [];
+  const passed=score>=70; results[bank].unshift({score,passed,at:Date.now()}); results[bank]=results[bank].slice(0,100);
+  localStorage.setItem(LS_EXAMS,JSON.stringify(results));
+  const drafts=examDrafts(); delete drafts[bank]; localStorage.setItem(LS_EXAM_DRAFT,JSON.stringify(drafts));
+  const sessions=savedSessions(); delete sessions[bank]; localStorage.setItem(LS_SESSION,JSON.stringify(sessions));
+  examMode=false;
+  examAllQuestions=[];
+  updateExamStats();
+  $("examStats").textContent = `${passed?"最近一次通过":"最近一次未通过"} · ${score}/100 分 · 及格线 70 分 · 模拟 ${results[bank].length} 次 · 通过率 ${Math.round(results[bank].filter(r=>r.passed).length/results[bank].length*100)}%`;
+  finishSession();
+}
+
+function saveExamDraft(bank = $("bankSelect").value) {
+  const drafts=examDrafts();
+  drafts[bank]={answers:Object.fromEntries(examAnswers),ids:examAllQuestions.map(q=>String(q.id))};
+  localStorage.setItem(LS_EXAM_DRAFT,JSON.stringify(drafts));
+}
+
+function saveSession(nextIndex = idx) {
+  const bank = $("bankSelect").value;
+  const all = savedSessions();
+  if (nextIndex >= queue.length) delete all[bank];
+  else all[bank] = {ids:queue.slice(nextIndex).map(q => String(q.id)), mode,
+    category:activeCategory, updatedAt:Date.now()};
+  localStorage.setItem(LS_SESSION, JSON.stringify(all));
+}
+
+function renderSessionStatus() {
+  const bank = $("bankSelect").value;
+  const saved = savedSessions()[bank];
+  $("btnResume").disabled = !saved?.ids?.length;
+  const seen = loadSeenStore()[bank] || {};
+  const done = questions.filter(q => seen[String(q.id)]).length;
+  $("sessionStatus").textContent = `已做 ${done}/${questions.length} 题 · 未做 ${questions.length-done} 题${saved?.ids?.length ? ` · 上次练习剩余 ${saved.ids.length} 题` : ""}`;
+  updateExamStats();
+}
 
 /** 从未提交过答案的题目在热图中使用的中性灰 */
 const HEAT_UNSEEN = "rgb(74, 84, 96)";
@@ -42,7 +110,11 @@ function loadAnalysisStore() {
 
 function getAnalysis(bankId, qid) {
   const id = String(qid);
-  return loadAnalysisStore()[bankId]?.[id] || "";
+  const edited = loadAnalysisStore()[bankId]?.[id];
+  if (edited) return edited;
+  const q = qById(id);
+  const record = q && typeof structuredAnalysis === "function" ? structuredAnalysis(bankId, q) : null;
+  return record ? analysisMarkdown(record) : "";
 }
 
 function setAnalysis(bankId, qid, text) {
@@ -197,7 +269,7 @@ function buildMemoryTip(q) {
     if (optionCount > 0 && answerCount === optionCount) {
       const lead = hasInclusive
         ? "这题是“包容型问法”：看到“包括/属于/体现/内容/原则/措施/职责/权利义务”等词，且选项都在同一正向范畴里，本题可按全选记。"
-        : "这题正确答案是全选，可以把四个选项合成一组概念背，不要拆成孤立答案。";
+        : "这题正确答案是全选，可以把所有选项合成一组概念背，不要拆成孤立答案。";
       return `${lead} 做同类多选时先找“明显异类、绝对化、否定项”，找不到再大胆考虑全选。`;
     }
     if (hasNegative) {
@@ -248,6 +320,7 @@ async function loadQuestions(bankId) {
   questions = await r.json();
   if ($("bankSelect") && bankId === $("bankSelect").value) {
     renderCategoryControls();
+    renderSessionStatus();
   }
 }
 
@@ -269,11 +342,27 @@ function readSessionLimit() {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function practiceCategories(q, records) {
+  const labels = {single:"单选题", multi:"多选题", judge:"判断题"};
+  const result = labels[q.kind] ? [labels[q.kind]] : [];
+  const record = records?.[q.id];
+  if (record?.version === 2 && record.fingerprint === JSON.stringify([q.stem,q.options,q.answer])) {
+    if (record.study_type === "memory") result.push("记忆题");
+    if (record.study_type === "understanding") result.push("理解题");
+  }
+  return result;
+}
+
+function practiceRecords(bankId) {
+  try { return JSON.parse(localStorage.getItem("quiz_structured_analysis_v2") || "{}")[bankId] || {}; }
+  catch { return {}; }
+}
+
 function categoryCounts() {
-  const counts = new Map();
+  const counts = new Map(["记忆题","理解题","单选题","多选题","判断题"].map(name => [name,0]));
+  const records = practiceRecords($("bankSelect").value);
   for (const q of questions) {
-    const c = q.category || "其他综合题";
-    counts.set(c, (counts.get(c) || 0) + 1);
+    for (const c of practiceCategories(q, records)) counts.set(c, counts.get(c) + 1);
   }
   return counts;
 }
@@ -283,7 +372,8 @@ function renderCategoryControls() {
   const summary = $("categorySummary");
   if (!sel || !summary) return;
   const previous = sel.value;
-  const counts = [...categoryCounts().entries()].sort((a, b) => b[1] - a[1]);
+  const counts = [...categoryCounts().entries()];
+  $("unclassifiedStatus").textContent = `待 AI 判定：${questions.length-counts[0][1]-counts[1][1]} 题`;
   sel.innerHTML = "";
   for (const [name, count] of counts) {
     const o = document.createElement("option");
@@ -308,9 +398,14 @@ function renderCategoryControls() {
 }
 
 function buildQueue(bankId) {
+  if (savedSessions()[bankId]?.ids?.length && !confirm("开始新一轮会替换该题库上次的练习进度，是否继续？")) return false;
   const s = loadStats();
   const wrongIds = new Set(Object.keys(s[bankId] || {}));
-  if (mode === "wrong") {
+  if (mode === "unseen") {
+    const seen = loadSeenStore()[bankId] || {};
+    queue = questions.filter(q => !seen[String(q.id)]);
+    if (!queue.length) { alert("该题库已全部做过，可以复习错题或随机练习。"); return false; }
+  } else if (mode === "wrong") {
     queue = questions.filter((q) => wrongIds.has(String(q.id)));
     if (queue.length === 0) {
       alert("该题库暂无错题记录。");
@@ -318,7 +413,8 @@ function buildQueue(bankId) {
     }
   } else if (mode === "category") {
     activeCategory = $("categorySelect").value;
-    queue = questions.filter((q) => (q.category || "其他综合题") === activeCategory);
+    const records = practiceRecords(bankId);
+    queue = questions.filter(q => practiceCategories(q, records).includes(activeCategory));
     if (queue.length === 0) {
       alert("该分类下暂无题目。");
       return false;
@@ -326,7 +422,14 @@ function buildQueue(bankId) {
   } else {
     queue = [...questions];
   }
+  const order = mode === "category" || mode === "wrong" ? $("practiceMode").value : mode;
+  const seen = loadSeenStore()[bankId] || {};
+  if (order === "unseen") queue = queue.filter(q => !seen[String(q.id)]);
+  if (!queue.length) { alert("当前范围内没有未做题，可切换为未做题优先或随机复习。"); return false; }
   shuffleInPlace(queue);
+  if (order === "unseen-first") {
+    queue = [...queue.filter(q => !seen[String(q.id)]), ...queue.filter(q => seen[String(q.id)])];
+  }
   const cap = readSessionLimit();
   if (cap > 0 && queue.length > cap) {
     queue = queue.slice(0, cap);
@@ -444,6 +547,8 @@ function syncSubmitState(q) {
 }
 
 function renderQuestion() {
+  $("btnSubmit").classList.remove("hidden");
+  saveSession();
   const bankId = $("bankSelect").value;
   const total = queue.length;
   const q = queue[idx];
@@ -466,8 +571,7 @@ function renderQuestion() {
     idx + 1
   } / ${total}`;
 
-  const category = q.category ? ` · ${q.category}` : "";
-  $("qType").textContent = `${q.type || "题目"}${category}`;
+  $("qType").textContent = practiceCategories(q, practiceRecords(bankId)).join(" · ") || q.type || "题目";
   $("qStem").textContent = q.stem;
   const opts = $("qOpts");
   opts.innerHTML = "";
@@ -507,6 +611,9 @@ function afterSubmit() {
 }
 
 function finishSession() {
+  if (examMode) {
+    saveExamDraft();
+  }
   showSetup();
   $("btnSubmit").classList.remove("hidden");
   $("progressBar").style.width = "0%";
@@ -733,48 +840,17 @@ async function fetchAnalysisText(bankId, qid) {
   if (!q) {
     return { ok: false, text: "找不到题目内容，请确认已加载该题库。" };
   }
-  const base = (cfg.base || "https://api.deepseek.com").replace(/\/$/, "");
-  const model = cfg.model || "deepseek-chat";
-  const userPrompt = buildAiPrompt(q);
   try {
-    const res = await fetch(`${base}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${cfg.key}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: "你是一名严谨的教师资格考试辅导老师。" },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.4,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return { ok: false, text: `请求失败（${res.status}）：${JSON.stringify(data)}` };
-    }
-    const txt = data.choices?.[0]?.message?.content || JSON.stringify(data);
-    return { ok: true, text: txt };
+    const record = await requestConciseAnalysis(q, cfg);
+    saveStructuredAnalysis(bankId, q, record);
+    return { ok: true, text: analysisMarkdown(record) };
   } catch (e) {
     return { ok: false, text: String(e) };
   }
 }
 
 function buildAiPrompt(q) {
-  const letters = Object.keys(q.options).sort();
-  const optsText = letters.map((L) => `${L}. ${q.options[L]}`).join("\n");
-  const correctText = formatAnswerForUi(q);
-  const categoryText = q.category ? `\n知识分类：${q.category}` : "";
-  const hint =
-    q.kind === "judge"
-      ? "说明判断依据、绝对化/否定词等常见陷阱。"
-      : q.kind === "multi"
-        ? "逐项说明应选或不选的理由，并重点总结多选题套路：是否属于全选、排除一项、同类列举、否定反选；如果能从题干关键词判断，例如“包括、体现、原则、措施、职责、权利义务”等，请明确写出。"
-        : "说明正确选项为什么对、其它选项错在哪里，并总结题干关键词与干扰项套路。";
-  return `请用中文简要分析下面这道${q.type || "题目"}：${hint}控制在 450 字以内，最后给出1-2条tricky记忆/速判方法，但不要编造不可靠规律。${categoryText}\n\n题干：\n${q.stem}\n\n选项：\n${optsText}\n\n正确答案：${correctText}`;
+  return concisePrompt(q);
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -799,7 +875,8 @@ $("overviewBankSelect").addEventListener("change", async () => {
 
 $("btnStart").addEventListener("click", async () => {
   const bankId = $("bankSelect").value;
-  mode = "all";
+  examMode=false; examAllQuestions=[];
+  mode = $("practiceMode").value;
   await loadQuestions(bankId);
   if (!buildQueue(bankId)) return;
   showQuiz();
@@ -808,6 +885,7 @@ $("btnStart").addEventListener("click", async () => {
 
 $("btnCategory").addEventListener("click", async () => {
   const bankId = $("bankSelect").value;
+  examMode=false; examAllQuestions=[];
   mode = "category";
   await loadQuestions(bankId);
   if (!buildQueue(bankId)) return;
@@ -817,6 +895,7 @@ $("btnCategory").addEventListener("click", async () => {
 
 $("btnWrong").addEventListener("click", async () => {
   const bankId = $("bankSelect").value;
+  examMode=false; examAllQuestions=[];
   mode = "wrong";
   await loadQuestions(bankId);
   if (!buildQueue(bankId)) return;
@@ -824,27 +903,60 @@ $("btnWrong").addEventListener("click", async () => {
   renderQuestion();
 });
 
+$("btnExam").addEventListener("click", async () => {
+  const bank=$("bankSelect").value;
+  await loadQuestions(bank);
+  if (savedSessions()[bank]?.ids?.length && !confirm("开始组卷会替换该题库当前练习断点，继续吗？")) return;
+  const groups={single:questions.filter(q=>q.kind==="single"),multi:questions.filter(q=>q.kind==="multi"),judge:questions.filter(q=>q.kind==="judge")};
+  if(groups.single.length<40||groups.multi.length<20||groups.judge.length<20){alert("该题库题型数量不足，无法组卷。");return;}
+  queue=[];
+  for(const [kind,count] of [["single",40],["multi",20],["judge",20]]){shuffleInPlace(groups[kind]);queue.push(...groups[kind].slice(0,count));}
+  shuffleInPlace(queue); idx=0; mode="exam"; examMode=true;
+  examAllQuestions=[...queue]; examAnswers=new Map(); saveExamDraft(bank);
+  showQuiz(); renderQuestion();
+});
+
 $("btnExit").addEventListener("click", () => {
   finishSession();
 });
 
+$("btnResume").addEventListener("click", async () => {
+  try {
+    const bank = $("bankSelect").value;
+    const saved = savedSessions()[bank];
+    if (!saved?.ids?.length) return;
+    await loadQuestions(bank);
+    const byId = new Map(questions.map(q => [String(q.id),q]));
+    queue = saved.ids.map(id => byId.get(id)).filter(Boolean);
+    mode = saved.mode;
+    examMode = mode === "exam";
+    examAllQuestions=[];
+    if (examMode) {
+      const draft=examDrafts()[bank] || {};
+      examAnswers=new Map(Object.entries(draft.answers || {}));
+      examAllQuestions=(draft.ids || []).map(id=>byId.get(String(id))).filter(Boolean);
+      if (examAllQuestions.length !== 80) throw new Error("模拟考试记录不完整，无法恢复。");
+    }
+    activeCategory = saved.category;
+    idx = 0;
+    if (!queue.length) { saveSession(); renderSessionStatus(); alert("上次练习的题目已不在当前题库中。"); return; }
+    showQuiz(); renderQuestion();
+  } catch (error) { alert(`无法恢复练习：${error.message}`); }
+});
+
 $("btnSubmit").addEventListener("click", () => {
+  if ($("btnSubmit").classList.contains("hidden")) return;
   const bankId = $("bankSelect").value;
   const q = queue[idx];
   const ok = isCorrect(q);
+  if(examMode){examAnswers.set(String(q.id),userAnswerString(q));saveExamDraft(bankId);}
   const fb = $("feedback");
   fb.classList.remove("hidden", "ok", "bad");
   fb.classList.add(ok ? "ok" : "bad");
-  const tip = buildMemoryTip(q);
-  fb.textContent = ok ? "回答正确。" : `回答错误。正确答案是：${formatAnswerForUi(q)}。`;
-  if (tip) {
-    const tipEl = document.createElement("div");
-    tipEl.className = "memory-tip";
-    tipEl.textContent = `记忆提示：${tip}`;
-    fb.appendChild(tipEl);
-  }
+  fb.textContent = examMode ? (ok ? "本题答对。" : "本题答错，成绩交卷后公布。") : (ok ? "回答正确。" : `回答错误。正确答案是：${formatAnswerForUi(q)}。`);
   markQuestionSeen(bankId, String(q.id));
   if (!ok) bumpWrong(bankId, String(q.id));
+  saveSession(idx + 1);
 
   $("qOpts").querySelectorAll(".opt").forEach((lab) => {
     const inp = lab.querySelector("input");
@@ -866,14 +978,13 @@ $("btnSubmit").addEventListener("click", () => {
     }
   });
   afterSubmit();
-  if (!ok) {
-    mountQuizAnalysisShell(bankId, String(q.id));
-  }
+  if(!examMode) mountQuizAnalysisShell(bankId, String(q.id));
 });
 
 $("btnNext").addEventListener("click", () => {
   idx += 1;
   if (idx >= queue.length) {
+    if(examMode){finishExam($("bankSelect").value);return;}
     alert("本轮已完成。");
     $("btnSubmit").classList.remove("hidden");
     finishSession();
@@ -900,18 +1011,31 @@ $("btnSaveKey").addEventListener("click", () => {
 });
 
 async function init() {
+  applyTheme(localStorage.getItem(LS_THEME)==="day"?"day":"night");
   const cfg = loadApiCfg();
   if (cfg.key) $("apiKey").value = cfg.key;
   if (cfg.base) $("apiBase").value = cfg.base;
   if (cfg.model) $("apiModel").value = cfg.model;
   await fetchBanks();
+  const recent = Object.entries(savedSessions()).filter(([bank, session]) => banks.some(b => b.id === bank) && session.ids?.length)
+    .sort((a,b) => b[1].updatedAt-a[1].updatedAt)[0];
+  if (recent) {
+    $("bankSelect").value = recent[0];
+    $("overviewBankSelect").value = recent[0];
+  }
   applyPageVisibility();
   const first = $("bankSelect").value;
   if (first) {
     await loadQuestions(first);
     renderHeatMatrix();
   }
+  updateExamStats();
 }
+
+$("themeToggle").addEventListener("click",()=>{
+  const theme=document.body.dataset.theme==="day"?"night":"day";
+  localStorage.setItem(LS_THEME,theme);applyTheme(theme);
+});
 
 init().catch((e) => {
   console.error(e);

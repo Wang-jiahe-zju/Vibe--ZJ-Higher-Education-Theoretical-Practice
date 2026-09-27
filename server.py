@@ -83,14 +83,14 @@ def _split_options_block(block: str) -> dict[str, str]:
     # Normalize full-width punctuation
     t = block.replace("．", ".").replace("；", ";")
     # Insert delimiter before each option letter at line start or after ;
-    parts = re.split(r"(?=(?:^|[;\n])\s*[ABCD][\.．、]|\n\s*[ABCD][\.．、])", t, flags=re.MULTILINE)
+    parts = re.split(r"(?=(?:^|[;\n])\s*[ABCDE][\.．、]|\n\s*[ABCDE][\.．、])", t, flags=re.MULTILINE)
     for part in parts:
         part = part.strip().strip(";").strip()
         if not part:
             continue
-        m = re.match(r"^([ABCD])[\.．、]\s*(.+)$", part, re.DOTALL)
+        m = re.match(r"^([ABCDE])[\.．、]\s*(.+)$", part, re.DOTALL)
         if not m:
-            m = re.match(r"^([ABCD])\s+(.+)$", part, re.DOTALL)
+            m = re.match(r"^([ABCDE])\s+(.+)$", part, re.DOTALL)
         if m:
             letter, rest = m.group(1), m.group(2).strip()
             rest = re.sub(r"\s+", " ", rest)
@@ -98,10 +98,10 @@ def _split_options_block(block: str) -> dict[str, str]:
     if len(opts) >= 2:
         return opts
     # Fallback: split by A./B./ pattern in one line
-    chunks = re.split(r"(?=[ABCD][\.．、])", t)
+    chunks = re.split(r"(?=[ABCDE][\.．、])", t)
     for ch in chunks:
         ch = ch.strip()
-        m = re.match(r"^([ABCD])[\.．、]\s*(.+)$", ch, re.DOTALL)
+        m = re.match(r"^([ABCDE])[\.．、]\s*(.+)$", ch, re.DOTALL)
         if m:
             opts[m.group(1)] = m.group(2).strip().rstrip(";").strip()
     return opts
@@ -110,7 +110,7 @@ def _split_options_block(block: str) -> dict[str, str]:
 def _infer_kind(qtype_label: str, answer_raw: str) -> str:
     if "判断" in qtype_label:
         return "judge"
-    letters = "".join(sorted(set(re.findall(r"[ABCD]", str(answer_raw).upper()))))
+    letters = "".join(sorted(set(re.findall(r"[ABCDE]", str(answer_raw).upper()))))
     if len(letters) >= 2:
         return "multi"
     if len(letters) == 1:
@@ -133,9 +133,9 @@ def _canonical_answer(kind: str, answer_raw: str) -> str:
             return su
         return ""
     if kind == "multi":
-        letters = sorted(set(re.findall(r"[ABCD]", s.upper())))
+        letters = sorted(set(re.findall(r"[ABCDE]", s.upper())))
         return "".join(letters)
-    su = re.sub(r"[^ABCD]", "", s.upper())
+    su = re.sub(r"[^ABCDE]", "", s.upper())
     return su[:1] if su else ""
 
 
@@ -198,7 +198,7 @@ def parse_cell_to_question(raw: str, answer_cell: str) -> dict:
     option_lines: list[str] = []
     seen_option = False
     for line in lines:
-        if re.match(r"^[ABCD][\.．、]", line) or re.match(r"^[ABCD]\s+\S", line):
+        if re.match(r"^[ABCDE][\.．、]", line) or re.match(r"^[ABCDE]\s+\S", line):
             seen_option = True
         if seen_option:
             option_lines.append(line)
@@ -209,7 +209,7 @@ def parse_cell_to_question(raw: str, answer_cell: str) -> dict:
     options = _split_options_block(opt_block)
     if not options and stem:
         combined = stem
-        m = re.search(r"[ABCD][\.．、]", combined)
+        m = re.search(r"[ABCDE][\.．、]", combined)
         if m:
             idx = m.start()
             real_stem = combined[:idx].strip()
@@ -238,11 +238,11 @@ def _question_ok(q: dict) -> bool:
     if q["kind"] == "judge":
         return q["answer"] in ("A", "B")
     if q["kind"] == "single":
-        return len(q["answer"]) == 1 and q["answer"] in "ABCD" and len(q["options"]) >= 2
+        return len(q["answer"]) == 1 and q["answer"] in "ABCDE" and len(q["options"]) >= 2
     if q["kind"] == "multi":
         if len(q["answer"]) < 2:
             return False
-        return all(ch in "ABCD" for ch in q["answer"]) and len(q["options"]) >= 2
+        return all(ch in "ABCDE" for ch in q["answer"]) and len(q["options"]) >= 2
     return False
 
 

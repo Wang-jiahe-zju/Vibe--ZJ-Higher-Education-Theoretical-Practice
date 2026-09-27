@@ -11,6 +11,36 @@
   font-family: "SF Pro Text", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+body[data-theme="day"] {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --text: #202833;
+  --muted: #596575;
+  --accent: #1769c2;
+  --ok: #188348;
+  --bad: #c53030;
+  --border: #d4dae2;
+  background: var(--bg);
+}
+
+body[data-theme="day"] .nav-btn,
+body[data-theme="day"] select,
+body[data-theme="day"] input[type="text"],
+body[data-theme="day"] input[type="password"],
+body[data-theme="day"] .card,
+body[data-theme="day"] .category-chip,
+body[data-theme="day"] .wrong-item {
+  background: #f8fafc;
+  color: var(--text);
+}
+
+body[data-theme="day"] .heat-matrix,
+body[data-theme="day"] .wrong-heat-strip,
+body[data-theme="day"] .ai-details,
+body[data-theme="day"] .feedback {
+  background: #f1f4f7;
+}
+
 * {
   box-sizing: border-box;
 }

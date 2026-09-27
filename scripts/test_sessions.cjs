@@ -1,0 +1,43 @@
+const vm = require('node:vm');
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const values = new Map();
+const elements = new Map();
+const context = vm.createContext({console,Date,Set,Map,Math,JSON,
+  localStorage:{getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)},
+  document:{querySelectorAll:()=>[],getElementById:id=>{
+    if(!elements.has(id)) elements.set(id,{value:id==='bankSelect'?'bank':'',addEventListener(){}});
+    return elements.get(id);
+  }},confirm:()=>true,alert:()=>{}});
+vm.runInContext(fs.readFileSync('static/app.js','utf8').split('init().catch')[0],context);
+const run = code => vm.runInContext(code,context);
+run(`questions=[{id:'1'},{id:'2'},{id:'3'}]; mode='unseen'; markQuestionSeen('bank','1'); buildQueue('bank'); saveSession();`);
+assert.equal(run('queue.length'),2);
+assert(!run("queue.some(q=>q.id==='1')"));
+const original = run('JSON.stringify(savedSessions().bank.ids)');
+assert.equal(original,run('JSON.stringify(queue.map(q=>q.id))'));
+run('saveSession(1)');
+assert.equal(run('savedSessions().bank.ids.length'),1);
+run('saveSession(queue.length)');
+assert.equal(run('savedSessions().bank'),undefined);
+run("mode='all';buildQueue('bank');saveSession();");
+assert.equal(run('savedSessions().bank.ids.length'),3);
+context.confirm=()=>true;
+run(`questions=[{id:'1',kind:'single'},{id:'2',kind:'single'},{id:'3',kind:'multi'}]; mode='unseen-first';buildQueue('bank');`);
+assert.equal(run('queue[2].id'),'1');
+elements.get('sessionLimit').value='1';
+run("buildQueue('bank')");
+assert.notEqual(run('queue[0].id'),'1');
+elements.get('sessionLimit').value='';
+run(`mode='category';document.getElementById('categorySelect').value='单选题';document.getElementById('practiceMode').value='unseen-first';buildQueue('bank');`);
+assert.equal(run('queue.length'),2);
+assert.equal(run('queue[0].id'),'2');
+assert.equal(run('categoryCounts().get("记忆题")'),0);
+run(`localStorage.setItem('quiz_structured_analysis_v2',JSON.stringify({bank:{'2':{version:2,study_type:'memory',fingerprint:JSON.stringify([questions[1].stem,questions[1].options,questions[1].answer])}}}));`);
+assert.equal(run('categoryCounts().get("记忆题")'),1);
+run(`questions[1].stem='changed'`);
+assert.equal(run('categoryCounts().get("记忆题")'),0);
+context.confirm=()=>false;
+assert.equal(run("buildQueue('bank')"),false);
+assert.equal(run('savedSessions().bank.ids.length'),3);
+console.log('PASS: unseen queue, order persistence, submit advance, completion cleanup, overwrite cancellation');
